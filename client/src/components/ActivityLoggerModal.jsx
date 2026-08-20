@@ -1,12 +1,14 @@
 import React, { useState } from 'react';
 import { X, Calculator } from 'lucide-react';
 import { calculateEmissions, EMISSION_FACTORS } from '../utils/emissionEngine.js';
+import { useAuth } from '../context/AuthContext';
 
 export default function ActivityLoggerModal({ isOpen, onClose, onAddLog }) {
+  const { user: currentUser } = useAuth();
   const [category, setCategory] = useState('Transport');
   const [activityType, setActivityType] = useState('Car commute (Petrol/Diesel)');
   const [quantity, setQuantity] = useState(25);
-  const [user, setUser] = useState('R. Kumar');
+  const [user, setUser] = useState(currentUser?.username || 'R. Kumar');
 
   if (!isOpen) return null;
 
@@ -24,7 +26,8 @@ export default function ActivityLoggerModal({ isOpen, onClose, onAddLog }) {
   const handleSubmit = (e) => {
     e.preventDefault();
     onAddLog({
-      user,
+      user: currentUser ? currentUser.username : user,
+      userId: currentUser ? currentUser.id : 2,
       category,
       activity_type: activityType,
       quantity: parseFloat(quantity)
@@ -50,12 +53,13 @@ export default function ActivityLoggerModal({ isOpen, onClose, onAddLog }) {
         <form onSubmit={handleSubmit}>
           <div className="form-group">
             <label className="form-label">User Profile</label>
-            <select className="form-select" value={user} onChange={(e) => setUser(e.target.value)}>
-              <option value="R. Kumar">R. Kumar (Engineering)</option>
-              <option value="A. Singh">A. Singh (Marketing)</option>
-              <option value="P. Joshi">P. Joshi (Design)</option>
-              <option value="M. Nair">M. Nair (Sales)</option>
-            </select>
+            <input
+              type="text"
+              className="form-input"
+              value={currentUser ? `${currentUser.username} (${currentUser.email})` : user}
+              readOnly
+              style={{ background: '#f8fafc' }}
+            />
           </div>
 
           <div className="form-group">

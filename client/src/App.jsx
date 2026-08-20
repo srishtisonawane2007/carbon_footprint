@@ -8,11 +8,17 @@ import GoalTracker from './components/GoalTracker';
 import Leaderboard from './components/Leaderboard';
 import CorporateDashboard from './components/CorporateDashboard';
 import EcoTips from './components/EcoTips';
+import AdminDashboard from './components/AdminDashboard';
+import AuthModal from './components/AuthModal';
+import { AuthProvider, useAuth } from './context/AuthContext';
 import { fetchDashboardSummary, logNewActivity, fetchLeaderboard, fetchOrgStats } from './services/api';
 
-export default function App() {
+function MainLayout() {
+  const { user } = useAuth();
   const [activeTab, setActiveTab] = useState('dashboard');
+  const [viewMode, setViewMode] = useState('user'); // 'user' or 'admin'
   const [isLoggerOpen, setIsLoggerOpen] = useState(false);
+  const [isAuthOpen, setIsAuthOpen] = useState(false);
   const [dashboardData, setDashboardData] = useState(null);
   const [leaderboard, setLeaderboard] = useState([]);
   const [orgStats, setOrgStats] = useState(null);
@@ -39,7 +45,10 @@ export default function App() {
   }, []);
 
   const handleAddLog = async (newLogData) => {
-    const res = await logNewActivity(newLogData);
+    const res = await logNewActivity({
+      ...newLogData,
+      user: user ? user.username : 'R. Kumar'
+    });
     if (res && res.log && dashboardData) {
       setDashboardData({
         ...dashboardData,
@@ -66,58 +75,60 @@ export default function App() {
           activeTab={activeTab}
           setActiveTab={setActiveTab}
           onOpenLogger={() => setIsLoggerOpen(true)}
+          onOpenAuth={() => setIsAuthOpen(true)}
+          viewMode={viewMode}
+          setViewMode={setViewMode}
         />
 
         <div className="main-wrapper">
-          <Sidebar activeTab={activeTab} setActiveTab={setActiveTab} />
+          {viewMode === 'user' && <Sidebar activeTab={activeTab} setActiveTab={setActiveTab} />}
 
           <main className="content-area">
-            {activeTab === 'dashboard' && (
-              <DashboardOverview
-                data={dashboardData}
-                onOpenLogger={() => setIsLoggerOpen(true)}
-              />
-            )}
+            {viewMode === 'admin' ? (
+              <AdminDashboard />
+            ) : (
+              <>
+                {(activeTab === 'dashboard' || activeTab === 'logger') && (
+                  <DashboardOverview
+                    data={dashboardData}
+                    onOpenLogger={() => setIsLoggerOpen(true)}
+                  />
+                )}
 
-            {activeTab === 'logger' && (
-              <DashboardOverview
-                data={dashboardData}
-                onOpenLogger={() => setIsLoggerOpen(true)}
-              />
-            )}
+                {activeTab === 'stats' && <MyStats />}
 
-            {activeTab === 'stats' && <MyStats />}
+                {activeTab === 'goals' && (
+                  <GoalTracker goals={dashboardData.goalProgressList} />
+                )}
 
-            {activeTab === 'goals' && (
-              <GoalTracker goals={dashboardData.goalProgressList} />
-            )}
+                {activeTab === 'leaderboard' && (
+                  <Leaderboard leaderboard={leaderboard} />
+                )}
 
-            {activeTab === 'leaderboard' && (
-              <Leaderboard leaderboard={leaderboard} />
-            )}
+                {activeTab === 'corporate' && (
+                  <CorporateDashboard orgStats={orgStats} />
+                )}
 
-            {activeTab === 'corporate' && (
-              <CorporateDashboard orgStats={orgStats} />
-            )}
+                {activeTab === 'tips' && <EcoTips />}
 
-            {activeTab === 'tips' && <EcoTips />}
-
-            {activeTab === 'settings' && (
-              <div className="panel-card">
-                <h2 className="panel-title">Sustainability Preference Settings</h2>
-                <p style={{ color: '#64748b', marginTop: '0.5rem', marginBottom: '1rem' }}>
-                  Manage emission calculation factors, units (kg vs lbs CO₂e), and organization memberships.
-                </p>
-                <div className="form-group">
-                  <label className="form-label">Default Target Daily CO₂ Limit (kg)</label>
-                  <input type="number" className="form-input" defaultValue={6.0} />
-                </div>
-                <div className="form-group">
-                  <label className="form-label">Corporate Organization</label>
-                  <input type="text" className="form-input" defaultValue="EcoCorp Technologies" readOnly />
-                </div>
-                <button className="btn-primary" onClick={() => alert('Settings Saved!')}>Save Preferences</button>
-              </div>
+                {activeTab === 'settings' && (
+                  <div className="panel-card">
+                    <h2 className="panel-title">Sustainability Preference Settings</h2>
+                    <p style={{ color: '#64748b', marginTop: '0.5rem', marginBottom: '1rem' }}>
+                      Manage emission calculation factors, units (kg vs lbs CO₂e), and organization memberships.
+                    </p>
+                    <div className="form-group">
+                      <label className="form-label">Default Target Daily CO₂ Limit (kg)</label>
+                      <input type="number" className="form-input" defaultValue={6.0} />
+                    </div>
+                    <div className="form-group">
+                      <label className="form-label">Corporate Organization</label>
+                      <input type="text" className="form-input" defaultValue="EcoCorp Technologies" readOnly />
+                    </div>
+                    <button className="btn-primary" onClick={() => alert('Settings Saved!')}>Save Preferences</button>
+                  </div>
+                )}
+              </>
             )}
           </main>
         </div>
@@ -131,6 +142,19 @@ export default function App() {
         }}
         onAddLog={handleAddLog}
       />
+
+      <AuthModal
+        isOpen={isAuthOpen}
+        onClose={() => setIsAuthOpen(false)}
+      />
     </div>
+  );
+}
+
+export default function App() {
+  return (
+    <AuthProvider>
+      <MainLayout />
+    </AuthProvider>
   );
 }

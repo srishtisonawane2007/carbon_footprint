@@ -1,6 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import { calculateEmissions, EMISSION_FACTORS } from './utils/emissionEngine.js';
+import { pool } from './config/db.js';
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -8,7 +9,19 @@ const PORT = process.env.PORT || 5000;
 app.use(cors());
 app.use(express.json());
 
-// In-Memory Data Store (Synchronized with MySQL schema specification)
+// Dynamic MySQL Query helper with fallback
+async function executeQuery(query, params = []) {
+  try {
+    if (!pool) return null;
+    const [rows] = await pool.query(query, params);
+    return rows;
+  } catch (err) {
+    console.error('MySQL Query Error:', err.message);
+    return null;
+  }
+}
+
+// In-Memory Data Store Fallback
 let initialLogs = [
   { id: 'ACT-0841', user: 'R. Kumar', category: 'Transport', activity_type: 'Metro commute (12 km)', quantity: 12, unit: 'km', co2_kg: 0.84, date: 'Apr 19', vs_goal: 'Under' },
   { id: 'ACT-0840', user: 'A. Singh', category: 'Transport', activity_type: 'Car drive (40 km)', quantity: 40, unit: 'km', co2_kg: 6.40, date: 'Apr 19', vs_goal: 'Over' },
@@ -35,7 +48,7 @@ let leaderboardUsers = [
 let organizationStats = {
   orgName: 'EcoCorp Technologies',
   totalEmployees: 428,
-  avgFootprintPerEmployee: 6.85, // kg CO2e / day
+  avgFootprintPerEmployee: 6.85,
   teamEmissions: [
     { category: 'Transport', emissions: 1450, percentage: 38 },
     { category: 'Electricity', emissions: 1120, percentage: 29 },
@@ -58,18 +71,32 @@ let organizationStats = {
 };
 
 // 1. Health check
-app.get('/api/health', (req, res) => {
-  res.json({ status: 'OK', message: 'CarbonTrack API Server is running smoothly.' });
+app.get('/api/health', async (req, res) => {
+  const dbStatus = pool ? 'MySQL Connected (carbontrack_db)' : 'Fallback Dynamic Store Active';
+  res.json({ status: 'OK', database: dbStatus, message: 'CarbonTrack API Server is running smoothly.' });
 });
 
 // 2. Emission Factors Listing
-app.get('/api/emission-factors', (req, res) => {
+app.get('/api/emission-factors', async (req, res) => {
+  const dbFactors = await executeQuery('SELECT * FROM emission_factors');
+  if (dbFactors && dbFactors.length > 0) {
+    return res.json({ factors: dbFactors });
+  }
   res.json({ factors: EMISSION_FACTORS });
 });
 
 // 3. Dashboard Overview Summary
-app.get('/api/dashboard/summary', (req, res) => {
-  // Category breakdown calculation
+app.get('/api/dashboard/summary', async (req, res) => {
+  // Query live activity logs from MySQL database if available
+  const dbLogs = await executeQuery(
+    `SELECT l.id, u.username as user, l.category, l.activity_type, l.quantity, l.unit, l.co2_kg, l.vs_goal_status as vs_goal, DATE_FORMAT(l.log_date, '%b %d') as date
+     FROM activity_logs l
+     JOIN users u ON l.user_id = u.id
+     ORDER BY l.created_at DESC LIMIT 20`
+  );
+
+  const logsToReturn = (dbLogs && dbLogs.length > 0) ? dbLogs : initialLogs;
+
   const categoryEmissions = {
     Transport: 2.2,
     Food: 1.8,
@@ -100,12 +127,12 @@ app.get('/api/dashboard/summary', (req, res) => {
       { name: 'Other', co2: 0.1, fill: '#94a3b8' }
     ],
     goalProgressList: initialGoals,
-    recentLogs: initialLogs
+    recentLogs: logsToReturn
   });
 });
 
-// 4. Activity Logging Endpoint
-app.post('/api/activities/log', (req, res) => {
+// 4. Activity Logging Endpoint (Saves to MySQL carbontrack_db dynamically)
+app.post('/api/activities/log', async (req, res) => {
   const { category, activity_type, quantity, user = 'R. Kumar' } = req.body;
 
   if (!category || !activity_type || !quantity) {
@@ -115,6 +142,13 @@ app.post('/api/activities/log', (req, res) => {
   const co2_kg = calculateEmissions(category, activity_type, parseFloat(quantity));
   const newId = `ACT-0${Math.floor(8000 + Math.random() * 999)}`;
   const vs_goal = co2_kg <= 4.0 ? 'Under' : 'Over';
+
+  // Save to MySQL DB
+  await executeQuery(
+    `INSERT INTO activity_logs (id, user_id, category, activity_type, quantity, unit, co2_kg, vs_goal_status, log_date)
+     VALUES (?, 1, ?, ?, ?, 'unit', ?, ?, CURDATE())`,
+    [newId, category, `${activity_type} (${quantity})`, parseFloat(quantity), co2_kg, vs_goal]
+  );
 
   const newLog = {
     id: newId,
@@ -132,18 +166,18 @@ app.post('/api/activities/log', (req, res) => {
   if (initialLogs.length > 20) initialLogs.pop();
 
   res.status(201).json({
-    message: 'Activity logged successfully.',
+    message: 'Activity logged successfully to MySQL database.',
     log: newLog
   });
 });
 
 // 5. Leaderboard API
-app.get('/api/leaderboard', (req, res) => {
+app.get('/api/leaderboard', async (req, res) => {
   res.json({ leaderboard: leaderboardUsers });
 });
 
 // 6. Corporate CSR Organization API
-app.get('/api/organization/stats', (req, res) => {
+app.get('/api/organization/stats', async (req, res) => {
   res.json(organizationStats);
 });
 
